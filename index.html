@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>오늘의 상식 퀴즈</title>
+    <style>
+        /* CSS 시작 */
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+        h1 {
+            color: #4a90e2;
+            margin-bottom: 25px;
+            font-size: 1.8em;
+        }
+        #quiz-container {
+            border-top: 2px solid #eee;
+            padding-top: 20px;
+            min-height: 250px;
+            text-align: left;
+        }
+        .question-text {
+            font-size: 1.2em;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .choices button {
+            display: block;
+            width: 100%;
+            padding: 12px 15px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #fff;
+            text-align: left;
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .choices button:hover:not(:disabled) {
+            background-color: #e6f7ff;
+            border-color: #4a90e2;
+        }
+        .choices button.correct {
+            background-color: #d4edda;
+            border-color: #28a745;
+            font-weight: bold;
+        }
+        .choices button.incorrect {
+            background-color: #f8d7da;
+            border-color: #dc3545;
+            font-weight: bold;
+        }
+        #explanation-box {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f8ff;
+            border-left: 5px solid #4a90e2;
+            font-size: 0.95em;
+            display: none; /* 초기에는 숨김 */
+        }
+        #result-message {
+            margin-top: 20px;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+        #nav-buttons button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        #nav-buttons .start-quiz {
+            background-color: #4a90e2;
+            color: white;
+        }
+        #nav-buttons .review-mode {
+            background-color: #f5a623;
+            color: white;
+        }
+        /* 복습 모드 스타일 */
+        #review-list {
+            margin-top: 20px;
+            list-style: none;
+            padding: 0;
+        }
+        .review-item {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .review-item p {
+            margin: 5px 0;
+        }
+        .review-item .question-text {
+            color: #856404;
+            font-size: 1.1em;
+        }
+        .review-item .correct-answer {
+            color: #007bff;
+            font-weight: bold;
+        }
+        .review-item .review-explanation {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed #ffeeba;
+            color: #555;
+            font-size: 0.9em;
+        }
+        /* CSS 끝 */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="page-title">오늘의 상식 퀴즈</h1>
+        
+        <div id="loading" style="display: none; color: #4a90e2;">데이터 로딩 중...</div>
+        
+        <div id="quiz-container">
+            </div>
+
+        <div id="nav-buttons">
+            <button class="start-quiz" onclick="loadQuizData()">퀴즈 시작</button>
+            <button class="review-mode" onclick="showReviewMode()">복습 모드</button>
+        </div>
+    </div>
+
+    <script>
+        // JavaScript 시작
+        
+        // 💡 BASE_URL을 제거하고 상대 경로를 사용합니다. 
+        // Vercel이 index.html을 서빙하므로, API 요청은 자동으로 같은 도메인으로 전송됩니다.
+        const QUIZ_API_URL = '/api/quiz';
+        const ANSWER_KEY_API_URL = '/api/answer-key'; 
+
+        const STORAGE_KEY = 'wrong_answers'; 
+
+        let currentQuizData = []; 
+        let correctAnswerMap = {}; 
+        let currentQuestionIndex = 0;
+        let score = 0;
+
+        const quizContainer = document.getElementById('quiz-container');
+        const navButtons = document.getElementById('nav-buttons');
+        const loadingDiv = document.getElementById('loading');
+        const pageTitle = document.getElementById('page-title');
+
+        // ==========================================================
+        // Local Storage 관리 함수
+        // ==========================================================
+        
+        function getWrongAnswers() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            return data ? JSON.parse(data) : [];
+        }
+
+        /** 오답을 Local Storage에 추가합니다. (해설, 실제 정답 인덱스 포함) */
+        function addWrongAnswer(questionData, selectedIndex, actualCorrectIndex) {
+            const wrongAnswers = getWrongAnswers();
+            
+            const newWrongAnswer = {
+                question: questionData.question,
+                choices: questionData.choices,
+                explanation: questionData.explanation, 
+                correctAnswerIndex: actualCorrectIndex, // 💡 실제 정답 인덱스 저장
+                userAnswerIndex: selectedIndex,
+                savedTime: new Date().toLocaleString()
+            };
+
+            const isDuplicate = wrongAnswers.some(item => item.question === newWrongAnswer.question);
+            if (!isDuplicate) {
+                wrongAnswers.push(newWrongAnswer);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(wrongAnswers));
+            }
+        }
+
+        function clearWrongAnswers() {
+            localStorage.removeItem(STORAGE_KEY);
+            alert('복습 문제가 모두 삭제되었습니다.');
+            showReviewMode(); 
+        }
+
+        // ==========================================================
+        // 메인 퀴즈 모드 로직
+        // ==========================================================
+
+        /** 퀴즈 데이터와 정답 키를 서버에서 가져와 매칭합니다. */
+        async function loadQuizData() {
+            pageTitle.textContent = '오늘의 상식 퀴즈';
+            quizContainer.innerHTML = '';
+            navButtons.innerHTML = '';
+            loadingDiv.style.display = 'block';
+
+            try {
+                // 1. 퀴즈 질문 목록 가져오기 (상대 경로 사용)
+                const quizResponse = await fetch(QUIZ_API_URL);
+                if (!quizResponse.ok) throw new Error(`Quiz data failed: ${quizResponse.status}`);
+                currentQuizData = await quizResponse.json();
+                
+                // 2. 퀴즈 정답 키 목록 가져오기 (상대 경로 사용)
+                const answerResponse = await fetch(ANSWER_KEY_API_URL);
+                if (!answerResponse.ok) throw new Error(`Answer key failed: ${answerResponse.status}`);
+                correctAnswerMap = await answerResponse.json(); 
+
+                // 3. 퀴즈 데이터에 정답 인덱스 매칭
+                currentQuizData = currentQuizData.map(q => {
+                    const id = q.id;
+                    return {
+                        ...q,
+                        correctAnswerIndex: correctAnswerMap[id] 
+                    };
+                });
+                
+                // 4. 로딩 완료 및 표시
+                currentQuestionIndex = 0;
+                score = 0;
+                loadingDiv.style.display = 'none';
+                displayQuestion();
+
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                // 💡 서버가 Vercel에서 작동하고 있으므로 로컬 서버 안내 문구를 수정합니다.
+                quizContainer.innerHTML = `<p style="color: red;">퀴즈 데이터 로딩 실패. Vercel 서버 문제일 수 있습니다: ${error.message}</p>`;
+                showHomeButtons();
+            }
+        }
+
+        /** 현재 질문을 화면에 표시합니다. */
+        function displayQuestion() {
+            if (currentQuestionIndex >= currentQuizData.length) {
+                showResults();
+                return;
+            }
+
+            const question = currentQuizData[currentQuestionIndex];
+            
+            if (typeof question.correctAnswerIndex === 'undefined') {
+                quizContainer.innerHTML = `<p style="color: red;">[오류] 정답 정보를 가져오지 못했습니다. 서버를 확인하세요.</p>`;
+                return;
+            }
+            
+            let choicesHtml = question.choices.map((choice, index) => `
+                <button onclick="checkAnswer(${index})">${choice}</button>
+            `).join('');
+
+            quizContainer.innerHTML = `
+                <p class="question-text">(${currentQuestionIndex + 1}/${currentQuizData.length}) ${question.question}</p>
+                <div class="choices" id="choices-container">
+                    ${choicesHtml}
+                </div>
+                <div id="feedback" style="margin-top: 15px;"></div>
+                <div id="explanation-box" style="display: none;">
+                    <strong>해설:</strong> <span id="explanation-text">${question.explanation || '해설이 제공되지 않았습니다.'}</span>
+                </div>
+            `;
+            navButtons.innerHTML = ''; 
+        }
+
+        /** 사용자의 답변을 확인하고 처리합니다. */
+        function checkAnswer(selectedIndex) {
+            const question = currentQuizData[currentQuestionIndex];
+            const actualCorrectIndex = question.correctAnswerIndex; 
+            const isCorrect = (selectedIndex === actualCorrectIndex);
+            
+            const choicesContainer = document.getElementById('choices-container');
+            const feedbackDiv = document.getElementById('feedback');
+            const explanationBox = document.getElementById('explanation-box'); 
+            
+            // 모든 버튼 비활성화 및 정/오답 표시
+            Array.from(choicesContainer.children).forEach((button, index) => {
+                button.disabled = true;
+                if (index === actualCorrectIndex) {
+                    button.classList.add('correct'); 
+                }
+                if (index === selectedIndex && !isCorrect) {
+                    button.classList.add('incorrect'); 
+                }
+            });
+
+            if (isCorrect) {
+                score++;
+                feedbackDiv.innerHTML = '<span style="color: green;">✅ 정답입니다!</span>';
+            } else {
+                feedbackDiv.innerHTML = '<span style="color: red;">❌ 오답입니다.</span>';
+                // 💡 오답 시 Local Storage에 저장
+                addWrongAnswer(question, selectedIndex, actualCorrectIndex);
+            }
+
+            // 정답/오답 확인 후 해설 표시
+            explanationBox.style.display = 'block';
+
+            // 다음 문제 버튼
+            navButtons.innerHTML = `<button onclick="nextQuestion()">다음 문제 (${currentQuestionIndex + 1}/${currentQuizData.length})</button>`;
+        }
+
+        function nextQuestion() {
+            currentQuestionIndex++;
+            displayQuestion();
+        }
+
+        function showResults() {
+            quizContainer.innerHTML = `
+                <h2>퀴즈 종료!</h2>
+                <p id="result-message">최종 점수: ${score} / ${currentQuizData.length}</p>
+                <p>틀린 문제는 복습 모드에 자동 저장되었습니다. 나중에 다시 풀어보세요! 💪</p>
+            `;
+            showHomeButtons();
+        }
+
+        // ==========================================================
+        // 복습 모드 로직 (해설 포함, 정확한 정답 표시)
+        // ==========================================================
+
+        function showReviewMode() {
+            pageTitle.textContent = '📝 오답 복습 모드';
+            navButtons.innerHTML = '';
+            
+            const wrongAnswers = getWrongAnswers();
+            
+            if (wrongAnswers.length === 0) {
+                quizContainer.innerHTML = `<p>현재 저장된 오답 문제가 없습니다. 메인 퀴즈에서 문제를 틀리면 자동 저장됩니다!</p>`;
+            } else {
+                let reviewListHtml = wrongAnswers.map(item => {
+                    const correctAnswerText = item.choices[item.correctAnswerIndex];
+                    const userAnswerText = item.choices[item.userAnswerIndex];
+
+                    return `
+                        <li class="review-item">
+                            <p class="question-text">Q: ${item.question}</p>
+                            <p>선택했던 오답: <span style="color: #dc3545;">${userAnswerText}</span></p>
+                            <p class="correct-answer">정답: ${correctAnswerText}</p>
+                            <p class="review-explanation">해설: ${item.explanation || '해설이 제공되지 않았습니다.'}</p>
+                            <p style="font-size: 0.9em; color: #6c757d;">(저장 시간: ${item.savedTime})</p>
+                        </li>
+                    `;
+                }).join('');
+
+                quizContainer.innerHTML = `
+                    <h2>총 ${wrongAnswers.length}개의 복습 문제</h2>
+                    <ul id="review-list">
+                        ${reviewListHtml}
+                    </ul>
+                    <button onclick="clearWrongAnswers()" style="background-color: #dc3545; color: white;">복습 문제 전체 삭제</button>
+                `;
+            }
+            showHomeButtons();
+        }
+
+        // ==========================================================
+        // 공통 UI/네비게이션 함수
+        // ==========================================================
+
+        function showHomeButtons() {
+             navButtons.innerHTML = `
+                <button class="start-quiz" onclick="loadQuizData()">퀴즈 다시 시작</button>
+                <button class="review-mode" onclick="showReviewMode()">복습 모드 (${getWrongAnswers().length})</button>
+             `;
+        }
+        
+        showHomeButtons(); 
+        // 💡 Vercel 배포 후에는 로컬 서버 안내 문구 제거
+        quizContainer.innerHTML = '<p>상식 퀴즈를 시작하려면 "퀴즈 시작" 버튼을 누르세요. 서버가 Vercel에 정상 배포되었습니다.🚀</p>';
+
+        // JavaScript 끝
+    </script>
+</body>
+</html>
